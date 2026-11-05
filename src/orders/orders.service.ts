@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service.js';
 import type { Prisma } from '../generated/prisma/client.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 import type { CreateOrderDto } from './dto/create-order.dto.js';
 
 const orderSelect = {
@@ -21,7 +22,10 @@ const orderSelect = {
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   async findOne(id: number) {
     if (!Number.isInteger(id) || id < 1 || id > 2147483647) {
@@ -43,7 +47,7 @@ export class OrdersService {
     // All requests acquire stock locks in the same order.
     const items = [...dto.items].sort((a, b) => a.productId - b.productId);
 
-    return this.prisma.$transaction(async (tx) => {
+    const order = await this.prisma.$transaction(async (tx) => {
       const products = await tx.product.findMany({
         where: { id: { in: items.map((item) => item.productId) } },
       });
@@ -88,5 +92,8 @@ export class OrdersService {
         select: orderSelect,
       });
     });
+    // The transaction has committed and released its locks before the email wait.
+    await this.notifications.sendOrderCreated(order);
+    return order;
   }
 }
