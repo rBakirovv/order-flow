@@ -1,29 +1,25 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# OrderFlow
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Учебный проект по брокерам сообщений: NestJS, TypeScript, PostgreSQL и Prisma.
+**Этап 1 завершён:** синхронный REST API заказов с имитацией email на 3 секунды.
+Одно NestJS-приложение, модульный монолит. Следующий этап — RabbitMQ;
+его реализация планируется отдельно.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Критерии приёмки этапа 1
 
-## Description
+- [x] Приложение и PostgreSQL запускаются по командам ниже.
+- [x] Работают `POST /orders` и `GET /orders/:id`.
+- [x] DTO валидируются; ошибки возвращают `400`, `404` и `409`.
+- [x] Цены берутся из БД, в позиции заказа сохраняется историческая цена.
+- [x] Создание заказа и списание остатков выполняются атомарно.
+- [x] Конкурентные запросы не создают отрицательных остатков.
+- [x] Email имитируется после коммита и задерживает HTTP-ответ примерно на 3 секунды.
+- [x] Есть воспроизводимые миграции, seed и автоматизированные тесты основных сценариев.
+- [x] Результаты замеров и выводы записаны в [docs/observations.md](docs/observations.md).
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+Итоговая проверка выполнена 5 ноября 2026 года: 47 e2e-проверок на реальном
+PostgreSQL, 1 unit-тест, сборка, lint, проверка типов и Prisma schema прошли.
+Дополнительно проверен запуск собранного приложения с пустой временной БД.
 
 ## Project setup
 
@@ -131,7 +127,7 @@ SQL миграции содержит `CHECK`-ограничения: назва
 неотрицательные. В Prisma schema эти ограничения не выражаются, поэтому их
 нужно сохранять в SQL будущих миграций. Внешние ключи запрещают удалять заказ
 или товар, пока на них ссылаются позиции. Пара `orderId + productId` уникальна.
-Расчёт суммы и проверка непустого заказа будут реализованы в сервисе заказов.
+Сумму рассчитывает сервис заказов; непустой массив позиций проверяется DTO.
 
 ## Compile and run the project
 
