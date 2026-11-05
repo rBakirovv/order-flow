@@ -27,20 +27,23 @@
 
 ## Project setup
 
+Для локального запуска нужны Node.js 24 LTS, npm и работающий Docker Compose.
+NestJS запускается на компьютере, PostgreSQL — в Docker.
+
 ```bash
-$ npm install
+npm ci
+cp .env.example .env
 ```
+
+Задайте собственный `POSTGRES_PASSWORD` и обновите пароль в `DATABASE_URL`.
+Порт, имя базы и пользователь в URL должны совпадать с `POSTGRES_*`.
+Специальные символы в имени пользователя и пароле нужно URL-кодировать.
+Не перезаписывайте существующий `.env`: он может содержать ключи Observe.
 
 ## PostgreSQL в Docker
 
 Настройки находятся в `.env`: имя проекта, образ, имя контейнера, внешний порт,
 база, пользователь и пароль. `.env` исключён из Git.
-При первом клонировании создайте его из шаблона и задайте свой пароль:
-
-```bash
-cp .env.example .env
-```
-
 Запуск базы (Docker должен быть запущен):
 
 ```bash
@@ -64,22 +67,52 @@ docker compose down
 Данные сохраняются при пересоздании контейнера. `docker compose down -v` удаляет
 том вместе с данными. Имя базы, пользователь и пароль применяются при первом
 запуске с пустым томом; изменение `.env` не меняет их в существующей базе.
-Подключение NestJS к базе настраивается отдельно.
+NestJS подключается через Prisma по `DATABASE_URL`. `.env` загружается при старте
+приложения и команд Prisma; переменные окружения процесса имеют приоритет.
+На этом шаге Prisma schema содержит только настройки клиента и PostgreSQL:
+таблицы, миграции и seed будут добавлены на следующем шаге.
 
 ## Compile and run the project
 
 ```bash
+docker compose up -d --wait
+
 # development
-$ npm run start
+npm run start
 
 # watch mode
-$ npm run start:dev
+npm run start:dev
 
 # production mode
-$ npm run start:prod
+npm run build
+npm run start:prod
 ```
 
+Prisma Client генерируется автоматически перед сборкой, запуском в режиме
+разработки и командами `test` / `test:e2e`. Для ручной генерации:
+
+```bash
+npm run db:generate
+```
+
+При запуске `PrismaService` выполняет настоящий запрос `SELECT 1`. После сообщения
+`Connected to PostgreSQL` приложение начинает слушать `PORT` (по умолчанию 3000).
+Если `DATABASE_URL` не задан или БД недоступна, приложение завершается с ошибкой.
+При SIGINT/SIGTERM соединения с БД закрываются через shutdown hooks NestJS.
+
+Проверка работающего HTTP-сервера:
+
+```bash
+curl -i http://localhost:3000/
+```
+
+Ожидается `200 OK` и `Hello World!`. Endpoint заказов появится на следующих шагах.
+Конфигурация клиента соответствует [Prisma ORM 7](https://www.prisma.io/docs/orm/v7/prisma-schema/overview/generators).
+
 ## Run tests
+
+E2E-тесты используют реальный PostgreSQL из `DATABASE_URL`: сначала запустите
+`docker compose up -d --wait`. Unit-тест контроллера не требует БД.
 
 ```bash
 # unit tests
