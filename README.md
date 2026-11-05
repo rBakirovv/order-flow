@@ -31,6 +31,41 @@
 $ npm install
 ```
 
+## PostgreSQL в Docker
+
+Настройки находятся в `.env`: имя проекта, образ, имя контейнера, внешний порт,
+база, пользователь и пароль. `.env` исключён из Git.
+При первом клонировании создайте его из шаблона и задайте свой пароль:
+
+```bash
+cp .env.example .env
+```
+
+Запуск базы (Docker должен быть запущен):
+
+```bash
+docker compose up -d --wait
+docker compose ps
+```
+
+Для подключения с компьютера используйте адрес `127.0.0.1` и `POSTGRES_PORT`,
+`POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` из `.env`.
+Из других сервисов в той же Docker-сети адрес базы — `postgres:5432`.
+Имена сети и тома Docker Compose формирует из `COMPOSE_PROJECT_NAME`.
+
+```bash
+# Открыть psql в контейнере
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+
+# Остановить контейнеры, сохранив данные в томе
+docker compose down
+```
+
+Данные сохраняются при пересоздании контейнера. `docker compose down -v` удаляет
+том вместе с данными. Имя базы, пользователь и пароль применяются при первом
+запуске с пустым томом; изменение `.env` не меняет их в существующей базе.
+Подключение NestJS к базе настраивается отдельно.
+
 ## Compile and run the project
 
 ```bash
