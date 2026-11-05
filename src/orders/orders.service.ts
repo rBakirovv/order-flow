@@ -5,11 +5,39 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service.js';
+import type { Prisma } from '../generated/prisma/client.js';
 import type { CreateOrderDto } from './dto/create-order.dto.js';
+
+const orderSelect = {
+  id: true,
+  customerEmail: true,
+  status: true,
+  totalAmount: true,
+  items: {
+    orderBy: { productId: 'asc' },
+    select: { productId: true, quantity: true, unitPrice: true },
+  },
+} satisfies Prisma.OrderSelect;
 
 @Injectable()
 export class OrdersService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async findOne(id: number) {
+    if (!Number.isInteger(id) || id < 1 || id > 2147483647) {
+      throw new BadRequestException(
+        'Order id must be an integer between 1 and 2147483647',
+      );
+    }
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      select: orderSelect,
+    });
+    if (!order) {
+      throw new NotFoundException(`Order ${id} not found`);
+    }
+    return order;
+  }
 
   async create(dto: CreateOrderDto) {
     // All requests acquire stock locks in the same order.
@@ -57,16 +85,7 @@ export class OrdersService {
           totalAmount,
           items: { create: orderItems },
         },
-        select: {
-          id: true,
-          customerEmail: true,
-          status: true,
-          totalAmount: true,
-          items: {
-            orderBy: { productId: 'asc' },
-            select: { productId: true, quantity: true, unitPrice: true },
-          },
-        },
+        select: orderSelect,
       });
     });
   }

@@ -5,7 +5,7 @@ import type { App } from 'supertest/types.js';
 import { AppModule } from '../src/app.module.js';
 import { PrismaService } from '../src/database/prisma.service.js';
 
-describe('POST /orders (e2e)', () => {
+describe('Orders API (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
   const customerEmail = 'user@example.com';
@@ -53,6 +53,54 @@ describe('POST /orders (e2e)', () => {
       }),
     ).toEqual([{ stock: 5 }, { stock: 3 }, { stock: 0 }]);
   }
+
+  it('reads a created order with saved prices after the catalog changes', async () => {
+    const created = await post({
+      customerEmail,
+      items: [
+        { productId: 22, quantity: 1 },
+        { productId: 11, quantity: 2 },
+      ],
+    }).expect(201);
+    const before = await prisma.product.findMany({ orderBy: { id: 'asc' } });
+    await prisma.product.update({ where: { id: 11 }, data: { price: 9999 } });
+    const response = await request(app.getHttpServer())
+      .get(`/orders/${created.body.id}`)
+      .expect(200);
+    expect(response.body).toEqual(created.body);
+    expect(
+      await prisma.product.findMany({
+        orderBy: { id: 'asc' },
+        select: { stock: true },
+      }),
+    ).toEqual(before.map(({ stock }) => ({ stock })));
+    expect(await prisma.order.count()).toBe(1);
+    expect(await prisma.orderItem.count()).toBe(2);
+  });
+
+  it('returns 404 for a missing order', async () => {
+    await request(app.getHttpServer()).get('/orders/2147483647').expect(404);
+    await expectUnchanged();
+  });
+
+  it.each([
+    'abc',
+    '0',
+    '-1',
+    '1.5',
+    '1e0',
+    '0x1',
+    '1abc',
+    'NaN',
+    'Infinity',
+    '2147483648',
+    '9007199254740993',
+    '%20',
+    '%201%20',
+  ])('returns 400 for invalid order id %s', async (id) => {
+    await request(app.getHttpServer()).get(`/orders/${id}`).expect(400);
+    await expectUnchanged();
+  });
 
   it('creates an order using database prices and returns only API fields', async () => {
     const response = await post({
