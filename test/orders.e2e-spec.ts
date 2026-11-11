@@ -1,5 +1,4 @@
 import type { INestApplication } from '@nestjs/common';
-import { mkdirSync, writeFileSync } from 'node:fs';
 import type { MockInstance } from 'vitest';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -7,12 +6,15 @@ import type { App } from 'supertest/types.js';
 import { AppModule } from '../src/app.module.js';
 import { PrismaService } from '../src/database/prisma.service.js';
 import { NotificationsService } from '../src/notifications/notifications.service.js';
+import { RabbitMqPublisher } from '../src/messaging/rabbitmq-publisher.service.js';
+import type { SendOrderConfirmation } from '../src/notifications/send-order-confirmation.js';
 
 describe('Orders API (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
   let notifications: NotificationsService;
   let notificationSpy: MockInstance<NotificationsService['sendOrderCreated']>;
+  const publish = vi.fn<(command: SendOrderConfirmation) => Promise<void>>();
   const customerEmail = 'user@example.com';
   const valid = { customerEmail, items: [{ productId: 11, quantity: 1 }] };
   const post = (body: object) =>
@@ -21,7 +23,10 @@ describe('Orders API (e2e)', () => {
   beforeAll(async () => {
     const module = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(RabbitMqPublisher)
+      .useValue({ publish })
+      .compile();
     app = module.createNestApplication({ logger: false });
     await app.init();
     prisma = app.get(PrismaService);
@@ -33,6 +38,7 @@ describe('Orders API (e2e)', () => {
   });
 
   beforeEach(async () => {
+    publish.mockReset().mockResolvedValue(undefined);
     notificationSpy = vi.spyOn(notifications, 'sendOrderCreated');
     await prisma.orderItem.deleteMany();
     await prisma.order.deleteMany();
@@ -56,6 +62,7 @@ describe('Orders API (e2e)', () => {
 
   async function expectUnchanged() {
     expect(notificationSpy).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
     expect(await prisma.order.count()).toBe(0);
     expect(await prisma.orderItem.count()).toBe(0);
     expect(
@@ -66,15 +73,15 @@ describe('Orders API (e2e)', () => {
     ).toEqual([{ stock: 5 }, { stock: 3 }, { stock: 0 }]);
   }
 
-  it('waits for email after commit while reads and stock locks remain available', async () => {
-    // Only the baseline email is disabled; both requests use real HTTP and PostgreSQL.
-    notificationSpy.mockResolvedValueOnce(undefined);
-    const baselineStart = performance.now();
-    await post(valid).expect(201);
-    const baselineMs = performance.now() - baselineStart;
-
+  it('waits for publication after commit while reads and stock locks remain available', async () => {
+    let confirm!: () => void;
+    publish.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          confirm = resolve;
+        }),
+    );
     let completed = false;
-    const started = performance.now();
     const pending = post(valid)
       .expect(201)
       .then((response) => {
@@ -83,47 +90,51 @@ describe('Orders API (e2e)', () => {
       });
     try {
       await vi.waitFor(() => {
-        expect(notificationSpy).toHaveBeenCalledTimes(2);
+        expect(publish).toHaveBeenCalledOnce();
       });
       expect(completed).toBe(false);
-      const orderId = notificationSpy.mock.calls[1][0].id;
-      const readStart = performance.now();
+      const command = publish.mock.calls[0][0];
+      const orderId = command.orderId;
+      expect(command).toEqual({
+        messageId: expect.any(String),
+        orderId: expect.any(Number),
+        customerEmail,
+        createdAt: expect.any(String),
+      });
+      expect(command.messageId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(new Date(command.createdAt).toISOString()).toBe(command.createdAt);
       const read = await request(app.getHttpServer())
         .get(`/orders/${orderId}`)
         .expect(200);
-      const readMs = performance.now() - readStart;
       expect(read.body.id).toBe(orderId);
       expect(completed).toBe(false);
 
-      const lockStart = performance.now();
       await prisma.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT id FROM "Product" WHERE id = 11 FOR UPDATE NOWAIT`;
       });
-      const lockMs = performance.now() - lockStart;
       expect(completed).toBe(false);
+      confirm();
       const response = await pending;
-      const postMs = performance.now() - started;
-      expect(postMs).toBeGreaterThanOrEqual(2950);
       expect(response.body).toEqual(read.body);
-      mkdirSync('.tmp', { recursive: true });
-      writeFileSync(
-        '.tmp/notification-timing.json',
-        JSON.stringify(
-          {
-            measuredAt: new Date().toISOString(),
-            baselineMs: Math.round(baselineMs),
-            withEmailMs: Math.round(postMs),
-            readWhileWaitingMs: Math.round(readMs),
-            stockLockWhileWaitingMs: Math.round(lockMs),
-          },
-          null,
-          2,
-        ) + '\n',
-      );
     } finally {
+      confirm?.();
       await pending;
     }
   }, 10000);
+
+  it('returns the saved order with 201 when publication fails', async () => {
+    publish.mockRejectedValueOnce(new Error('Broker unavailable'));
+    const response = await post(valid).expect(201);
+    expect(await prisma.order.count()).toBe(1);
+    expect(
+      (await prisma.product.findUniqueOrThrow({ where: { id: 11 } })).stock,
+    ).toBe(4);
+    expect(publish.mock.calls[0][0].orderId).toBe(response.body.id);
+    const read = await request(app.getHttpServer())
+      .get(`/orders/${response.body.id}`)
+      .expect(200);
+    expect(read.body).toEqual(response.body);
+  });
 
   it('reads a created order with saved prices after the catalog changes', async () => {
     const created = await post({

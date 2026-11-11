@@ -92,7 +92,7 @@ export class OrdersService {
         select: orderSelect,
       });
     });
-    // The transaction has committed and released its locks before the email wait.
+    // Commit and release stock locks before waiting for the broker confirm.
     await this.notifications.sendOrderCreated(order);
     return order;
   }
